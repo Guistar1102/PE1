@@ -1,0 +1,5 @@
+{
+  "name": "燃气PE管道知识图谱 (Gas PE Pipeline KG)",
+  "description": "燃气聚乙烯管道数据可视化知识图谱系统。支持图谱交互编辑、模组场景加载、D3.js力导向图展示及本地存储功能。",
+  "requestFramePermissions": []
+}
