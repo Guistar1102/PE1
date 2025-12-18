@@ -17,7 +17,8 @@ import {
   Eye,
   EyeOff,
   Cloud,
-  Edit2
+  Edit2,
+  Palette
 } from 'lucide-react';
 import GraphCanvas from './components/GraphCanvas';
 import RiskCloudCanvas, { CloudParams } from './components/RiskCloudCanvas';
@@ -166,6 +167,17 @@ const App: React.FC = () => {
     showNotification("节点已删除", 'success');
   };
 
+  const handleUpdateNodeColor = (nodeId: string, color: string) => {
+    setGraphData(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, color } : n)
+    }));
+    // 同时更新当前选中的节点状态以便立即看到效果
+    if (selectedNode && selectedNode.id === nodeId) {
+      setSelectedNode({ ...selectedNode, color });
+    }
+  };
+
   const handleClearGraph = () => {
     if (window.confirm("确定要清空画布吗？未保存的数据将丢失。")) {
       setGraphData({ nodes: [], links: [] });
@@ -300,8 +312,7 @@ const App: React.FC = () => {
                     className="flex-1 bg-slate-800 border border-slate-700 text-sm rounded px-3 py-2 text-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
                     <option value="demo">默认演示数据</option>
-                    <option value="station_leak">场站泄漏应急场景</option>
-                    <option value="complex_network">复杂管网连接场景</option>
+                    <option value="inspection_focus">全面检验重点模组</option>
                     <option value="empty">空白画布</option>
                   </select>
                   <button 
@@ -434,7 +445,7 @@ const App: React.FC = () => {
                     <div className="flex items-center gap-2 mb-2">
                       <div 
                         className="w-3 h-3 rounded-full" 
-                        style={{ backgroundColor: NODE_COLORS[selectedNode.type] }}
+                        style={{ backgroundColor: selectedNode.color || NODE_COLORS[selectedNode.type] }}
                       />
                       <span className="font-bold text-lg">{selectedNode.label}</span>
                     </div>
@@ -443,6 +454,15 @@ const App: React.FC = () => {
                       <div className="flex justify-between border-b border-slate-700/50 pb-1">
                         <span className="text-slate-400">类型:</span>
                         <span className="text-slate-200">{NODE_LABELS_ZH[selectedNode.type]}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-slate-700/50 pb-1 items-center">
+                        <span className="text-slate-400 flex items-center gap-1"><Palette size={12}/> 颜色:</span>
+                        <input 
+                          type="color" 
+                          value={selectedNode.color || NODE_COLORS[selectedNode.type]} 
+                          onChange={(e) => handleUpdateNodeColor(selectedNode.id, e.target.value)}
+                          className="h-6 w-10 bg-slate-800 border border-slate-700 rounded cursor-pointer"
+                        />
                       </div>
                       {selectedNode.properties && Object.keys(selectedNode.properties).length > 0 ? (
                         Object.entries(selectedNode.properties).map(([key, val]) => (

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+
+import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { GraphData, GraphNode, GraphLink, NodeType } from '../types';
 import { NODE_COLORS } from '../constants';
@@ -12,48 +13,34 @@ interface GraphCanvasProps {
 
 const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onNodeClick, width = 800, height = 600 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
+  // 使用 ref 存储上一次的节点坐标，实现平滑过渡
+  const nodePositionsRef = useRef<Map<string, { x: number, y: number }>>(new Map());
 
-  // Helper to get color
   const getNodeColor = (type: string) => {
     return NODE_COLORS[type as NodeType] || NODE_COLORS.UNKNOWN;
   };
 
-  // Drag behavior definition
-  const drag = (simulation: d3.Simulation<GraphNode, GraphLink>) => {
-    function dragstarted(event: any) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      event.subject.fx = event.subject.x;
-      event.subject.fy = event.subject.y;
-    }
-
-    function dragged(event: any) {
-      event.subject.fx = event.x;
-      event.subject.fy = event.y;
-    }
-
-    function dragended(event: any) {
-      if (!event.active) simulation.alphaTarget(0);
-      event.subject.fx = null;
-      event.subject.fy = null;
-    }
-
-    return d3.drag<any, any>()
-      .on("start", dragstarted)
-      .on("drag", dragged)
-      .on("end", dragended);
-  };
-
   useEffect(() => {
-    if (!svgRef.current) return;
+    if (!svgRef.current || !width || !height) return;
+
+    // 1. 数据预处理：如果节点已存在，则继承之前的坐标，防止“脱节”和“炸开”
+    const nodes = data.nodes.map(d => {
+      const prevPos = nodePositionsRef.current.get(d.id);
+      return {
+        ...d,
+        x: prevPos?.x ?? d.x,
+        y: prevPos?.y ?? d.y
+      } as GraphNode;
+    });
+
+    // 复制连线数据，防止 D3 修改原始 state 对象
+    const links = data.links.map(d => ({ ...d } as GraphLink));
 
     const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove(); // Clear previous render
+    svg.selectAll("*").remove();
 
-    // Create a container group for zooming
     const g = svg.append("g");
 
-    // Zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 8])
       .on("zoom", (event) => {
@@ -62,45 +49,29 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onNodeClick, width = 80
 
     svg.call(zoom);
 
-    // Initialize Simulation
-    const simulation = d3.forceSimulation<GraphNode, GraphLink>(data.nodes)
-      .force("link", d3.forceLink<GraphNode, GraphLink>(data.links).id((d) => d.id).distance(120))
+    // 2. 初始化力导向物理引擎
+    const simulation = d3.forceSimulation<GraphNode, GraphLink>(nodes)
+      .force("link", d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(120))
       .force("charge", d3.forceManyBody().strength(-400))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide().radius(40));
-    
-    simulationRef.current = simulation;
+      .force("collide", d3.forceCollide().radius(45));
 
-    // Define arrow markers for directed edges
-    svg.append("defs").selectAll("marker")
-      .data(["end"])
-      .enter().append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 28) // Offset to not overlap node
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("d", "M0,-5L10,0L0,5")
-      .attr("fill", "#6b7280");
+    // 3. 关键修复：强制执行一次同步计算，确保在第一帧渲染前 source/target 已解析为对象
+    for (let i = 0; i < 30; ++i) simulation.tick();
 
-    // Draw Links
+    // 绘制连线
     const link = g.append("g")
       .attr("stroke", "#4b5563")
       .attr("stroke-opacity", 0.6)
       .selectAll("line")
-      .data(data.links)
+      .data(links)
       .join("line")
-      .attr("stroke-width", 2)
-      .attr("marker-end", "url(#arrow)");
+      .attr("stroke-width", 2);
 
-    // Link Labels
+    // 关系文字
     const linkLabel = g.append("g")
-      .attr("class", "link-labels")
       .selectAll("text")
-      .data(data.links)
+      .data(links)
       .join("text")
       .text(d => d.label)
       .attr("font-size", "10px")
@@ -108,33 +79,43 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onNodeClick, width = 80
       .attr("text-anchor", "middle")
       .attr("dy", -5);
 
-    // Draw Nodes
+    // 绘制节点
     const node = g.append("g")
       .attr("stroke", "#fff")
       .attr("stroke-width", 1.5)
       .selectAll<SVGCircleElement, GraphNode>("circle")
-      .data(data.nodes)
+      .data(nodes)
       .join("circle")
       .attr("r", 20)
-      .attr("fill", d => getNodeColor(d.type))
+      .attr("fill", d => d.color || getNodeColor(d.type))
       .attr("cursor", "pointer")
-      .call(drag(simulation));
+      .call(d3.drag<SVGCircleElement, GraphNode>()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        })
+      );
 
     node.on('click', (event, d) => {
-      event.stopPropagation(); // Prevent zoom click
+      event.stopPropagation();
       onNodeClick(d);
     });
 
-    node.append("title")
-      .text(d => `${d.label} (${d.type})`);
-
-    // Node Labels
+    // 节点文字
     const label = g.append("g")
-      .attr("class", "labels")
       .selectAll("text")
-      .data(data.nodes)
+      .data(nodes)
       .join("text")
-      .attr("dx", 0)
       .attr("dy", 32)
       .text(d => d.label)
       .attr("font-size", "12px")
@@ -143,18 +124,22 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onNodeClick, width = 80
       .style("pointer-events", "none")
       .style("text-shadow", "0 1px 2px rgba(0,0,0,0.8)");
 
-
-    // Simulation tick
+    // 更新位置的 Tick 函数
     simulation.on("tick", () => {
+      // 记录当前坐标以便下次继承
+      nodes.forEach(n => {
+        if (n.x && n.y) nodePositionsRef.current.set(n.id, { x: n.x, y: n.y });
+      });
+
       link
-        .attr("x1", d => (d.source as GraphNode).x!)
-        .attr("y1", d => (d.source as GraphNode).y!)
-        .attr("x2", d => (d.target as GraphNode).x!)
-        .attr("y2", d => (d.target as GraphNode).y!);
+        .attr("x1", d => (d.source as any).x)
+        .attr("y1", d => (d.source as any).y)
+        .attr("x2", d => (d.target as any).x)
+        .attr("y2", d => (d.target as any).y);
 
       linkLabel
-        .attr("x", d => ((d.source as GraphNode).x! + (d.target as GraphNode).x!) / 2)
-        .attr("y", d => ((d.source as GraphNode).y! + (d.target as GraphNode).y!) / 2);
+        .attr("x", d => ((d.source as any).x + (d.target as any).x) / 2)
+        .attr("y", d => ((d.source as any).y + (d.target as any).y) / 2);
 
       node
         .attr("cx", d => d.x!)
@@ -176,7 +161,6 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ data, onNodeClick, width = 80
         ref={svgRef} 
         width="100%" 
         height="100%" 
-        viewBox={`0 0 ${width} ${height}`}
         className="w-full h-full"
       />
       <div className="absolute bottom-4 right-4 text-xs text-gray-500 bg-black/50 p-2 rounded pointer-events-none">

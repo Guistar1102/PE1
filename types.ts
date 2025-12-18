@@ -1,3 +1,4 @@
+
 import { SimulationNodeDatum, SimulationLinkDatum } from 'd3';
 
 // Enum for Node Types specific to Gas PE Pipelines
@@ -17,6 +18,7 @@ export interface GraphNode extends SimulationNodeDatum {
   id: string;
   label: string;
   type: NodeType;
+  color?: string; // 自定义颜色属性
   properties?: Record<string, string | number>;
   // D3 simulation props (optional as they are added by D3)
   x?: number;
